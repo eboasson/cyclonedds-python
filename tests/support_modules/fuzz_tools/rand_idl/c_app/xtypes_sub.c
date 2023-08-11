@@ -23,6 +23,7 @@
 #include "dds/ddsi/ddsi_typelib.h"
 #include "dds/ddsi/ddsi_typebuilder.h"
 #include "dds/ddsc/dds_public_qosdefs.h"
+#include "dds/ddsc/dds_internal_api.h"
 
 #include "xtypes_sub.h"
 
@@ -37,7 +38,7 @@
 #error "DDSRT_ENDIAN neither LITTLE nor BIG"
 #endif
 
-static void tohex(unsigned char * in, size_t insz, char * out, size_t outsz)
+static void tohex(const unsigned char * in, size_t insz, char * out, size_t outsz)
 {
     const char * hex = "0123456789ABCDEF";
     size_t loop = (2 * insz + 1 > outsz) ? (outsz - 1) / 2 : insz;
@@ -49,7 +50,7 @@ static void tohex(unsigned char * in, size_t insz, char * out, size_t outsz)
     out[loop*2] = '\0';
 }
 
-static void xcdr2_deser(unsigned char * buf, uint32_t sz, void ** obj, const dds_topic_descriptor_t * desc)
+static void xcdr2_deser(const unsigned char * buf, uint32_t sz, void ** obj, const dds_topic_descriptor_t * desc)
 {
     unsigned char * data;
     uint32_t srcoff = 0;
@@ -190,8 +191,9 @@ int main(int argc, char **argv)
         if (topic < 0)
             return 1;
 
-        dds_typeinfo_t *type_info;
-        xcdr2_deser(descriptor->type_information.data, descriptor->type_information.sz, &type_info, &DDS_XTypes_TypeInformation_desc);
+        void *vtype_info;
+        xcdr2_deser(descriptor->type_information.data, descriptor->type_information.sz, &vtype_info, &DDS_XTypes_TypeInformation_desc);
+        dds_typeinfo_t *type_info = vtype_info;
 
         dds_topic_descriptor_t *generated_desc;
         if (dds_create_topic_descriptor(DDS_FIND_SCOPE_LOCAL_DOMAIN, participant, type_info, DDS_SECS(0), &generated_desc))
