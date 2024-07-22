@@ -193,14 +193,9 @@ static void ddspy_serdata_populate_hash (ddspy_serdata_t *this)
   // set initial hash to that of type
   sd->hash = sd->type->serdata_basehash;
 
-  // key may not have been populated; assume keyless
-  assert ((this->key && this->key_size) || csertype(this)->keyless);
-  if (this->key && this->key_size)
-  {
-    // xor type hash with hash of key
-    const uint32_t key_hash = hash_value (this->key, this->key_size);
-    sd->hash ^= key_hash;
-  }
+  // xor type hash with hash of key
+  const uint32_t key_hash = hash_value (this->key, this->key_size);
+  sd->hash ^= key_hash;
 }
 
 static bool serdata_eqkey (const struct ddsi_serdata *a, const struct ddsi_serdata *b)
@@ -1367,17 +1362,18 @@ static PyObject *ddspy_readtake_participant (PyObject *self, PyObject *args, dds
   (void)self;
 
   if (!PyArg_ParseTuple (args, "iLOO", &reader, &N, &participant_constructor, &cqos_to_qos))
-    return NULL;
+    return PyErr_Format (PyExc_RuntimeError, "ddspy_readtake_participant: parsetuple");
   if (!(Nu32 = check_number_of_samples (N)))
-    return NULL;
+    return PyErr_Format (PyExc_RuntimeError, "ddspy_readtake_participant: check_number_of_samples(%lld)", N);
 
-  dds_sample_info_t *info = dds_alloc (sizeof (dds_sample_info_t) * Nu32);
-  struct dds_builtintopic_participant **rcontainer = dds_alloc (sizeof (struct dds_builtintopic_participant *) * Nu32);
+  dds_sample_info_t *info = dds_alloc (sizeof (*info) * Nu32);
+  struct dds_builtintopic_participant **rcontainer = dds_alloc (sizeof (*rcontainer) * Nu32);
 
   if (!info || !rcontainer)
   {
-    PyErr_SetString (PyExc_Exception, "Could not allocate memory");
-    return NULL;
+    return PyErr_Format (PyExc_RuntimeError, "ddspy_readtake_participant: allocation");
+    //PyErr_SetString (PyExc_Exception, "Could not allocate memory");
+    //return NULL;
   }
 
   for (uint32_t i = 0; i < Nu32; ++i)
@@ -1386,6 +1382,8 @@ static PyObject *ddspy_readtake_participant (PyObject *self, PyObject *args, dds
   sts = readtake (reader, (void **)rcontainer, info, Nu32, Nu32);
   if (sts < 0)
     return PyLong_FromLong ((long)sts);
+  if ((uint32_t)sts > Nu32)
+    abort ();
 
   PyObject *list = PyList_New (sts);
 
@@ -1400,7 +1398,7 @@ static PyObject *ddspy_readtake_participant (PyObject *self, PyObject *args, dds
     PyObject *qos = PyObject_CallFunction (cqos_to_qos, "O", qos_p);
     if (PyErr_Occurred ())
       return NULL;
-    PyObject *item = PyObject_CallFunction (participant_constructor, "y#OO", rcontainer[i]->key.v, 16, qos, sampleinfo);
+    PyObject *item = PyObject_CallFunction (participant_constructor, "y#OO", rcontainer[i]->key.v, (Py_ssize_t) 16, qos, sampleinfo);
     if (PyErr_Occurred ())
       return NULL;
     PyList_SetItem (list, i, item); // steals ref
@@ -1437,12 +1435,12 @@ static PyObject *ddspy_readtake_endpoint (PyObject *self, PyObject *args, dds_re
   (void)self;
 
   if (!PyArg_ParseTuple (args, "iLOO", &reader, &N, &endpoint_constructor, &cqos_to_qos))
-    return NULL;
+    return PyErr_Format (PyExc_RuntimeError, "ddspy_readtake_endpoint: parsetuple");
   if (!(Nu32 = check_number_of_samples (N)))
-    return NULL;
+    return PyErr_Format (PyExc_RuntimeError, "ddspy_readtake_endpoint: check_number_of_samples(%lld)", N);
 
-  dds_sample_info_t *info = dds_alloc (sizeof (dds_sample_info_t) * Nu32);
-  struct dds_builtintopic_endpoint **rcontainer = dds_alloc (sizeof (struct dds_builtintopic_endpoint *) * Nu32);
+  dds_sample_info_t *info = dds_alloc (sizeof (*info) * Nu32);
+  struct dds_builtintopic_endpoint **rcontainer = dds_alloc (sizeof (*rcontainer) * Nu32);
 
   for (uint32_t i = 0; i < Nu32; ++i)
     rcontainer[i] = NULL;
@@ -1450,6 +1448,8 @@ static PyObject *ddspy_readtake_endpoint (PyObject *self, PyObject *args, dds_re
   sts = readtake (reader, (void **)rcontainer, info, Nu32, Nu32);
   if (sts < 0)
     return PyLong_FromLong ((long)sts);
+  if ((uint32_t)sts > Nu32)
+    abort ();
 
   PyObject *list = PyList_New (sts);
 
@@ -1480,25 +1480,55 @@ static PyObject *ddspy_readtake_endpoint (PyObject *self, PyObject *args, dds_re
 
     PyObject *sampleinfo = get_sampleinfo_pyobject (&info[i]);
     if (PyErr_Occurred ())
+    {
+      PyErr_Clear();
+      PyErr_SetString(PyExc_Exception, "Sampleinfo errored.");
       return NULL;
-    PyObject *qos_p = PyLong_FromVoidPtr (rcontainer[i]->qos);
-    if (PyErr_Occurred ())
-      return NULL;
-    PyObject *qos = PyObject_CallFunction (cqos_to_qos, "O", qos_p);
-    if (PyErr_Occurred ())
-      return NULL;
+    }
+
+    PyObject *qos_p, *qos;
+    if (rcontainer[i]->qos != NULL)
+    {
+      qos_p = PyLong_FromVoidPtr (rcontainer[i]->qos);
+      if (PyErr_Occurred ())
+      {
+        PyErr_Clear();
+        PyErr_SetString(PyExc_Exception, "VoidPtr errored.");
+        return NULL;
+      }
+      qos = PyObject_CallFunction (cqos_to_qos, "O", qos_p);
+      if (PyErr_Occurred ())
+      {
+        PyErr_Clear();
+        PyErr_SetString(PyExc_Exception, "Callfunc cqos errored.");
+        return NULL;
+      }
+    }
+    else
+    {
+      Py_INCREF(Py_None);
+      Py_INCREF(Py_None);
+      qos_p = Py_None;
+      qos = Py_None;
+    }
     PyObject *item = PyObject_CallFunction (
-            endpoint_constructor, "y#y#KssOOO",
-            rcontainer[i]->key.v, 16,
-            rcontainer[i]->participant_key.v, 16,
+            endpoint_constructor, "y#y#Ks#s#OOO",
+            rcontainer[i]->key.v, (Py_ssize_t) 16,
+            rcontainer[i]->participant_key.v, (Py_ssize_t) 16,
             rcontainer[i]->participant_instance_handle,
             rcontainer[i]->topic_name,
+            rcontainer[i]->topic_name == NULL ? 0 : strlen(rcontainer[i]->topic_name),
             rcontainer[i]->type_name,
+            rcontainer[i]->type_name == NULL ? 0 : strlen(rcontainer[i]->type_name),
             qos,
             sampleinfo,
             type_id_bytes);
     if (PyErr_Occurred ())
+    {
+      PyErr_Clear();
+      PyErr_SetString(PyExc_Exception, "Callfunc endpoint constructor errored.");
       return NULL;
+    }
     PyList_SetItem (list, i, item); // steals ref
     Py_DECREF (sampleinfo);
     Py_DECREF (qos_p);
@@ -1537,8 +1567,8 @@ static PyObject *ddspy_readtake_topic (PyObject *self, PyObject *args, dds_retur
   if (!(Nu32 = check_number_of_samples (N)))
     return NULL;
 
-  dds_sample_info_t *info = dds_alloc (sizeof (dds_sample_info_t) * Nu32);
-  struct dds_builtintopic_topic **rcontainer = dds_alloc (sizeof (struct dds_builtintopic_topic *) * Nu32);
+  dds_sample_info_t *info = dds_alloc (sizeof (*info) * Nu32);
+  struct dds_builtintopic_topic **rcontainer = dds_alloc (sizeof (*rcontainer) * Nu32);
 
   for (uint32_t i = 0; i < Nu32; ++i)
     rcontainer[i] = NULL;
@@ -1587,7 +1617,7 @@ static PyObject *ddspy_readtake_topic (PyObject *self, PyObject *args, dds_retur
       return NULL;
     PyObject *item = PyObject_CallFunction (
             endpoint_constructor, "y#ssOOO",
-            rcontainer[i]->key.d, 16,
+            rcontainer[i]->key.d, (Py_ssize_t) 16,
             rcontainer[i]->topic_name,
             rcontainer[i]->type_name,
             qos,
