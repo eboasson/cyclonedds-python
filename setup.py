@@ -97,8 +97,8 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     author='Eclipse Cyclone DDS Committers',
-    maintainer='Thijs Miedema',
-    maintainer_email='thijs.miedema@zettascale.tech',
+    maintainer='Erik Boasson',
+    maintainer_email='eb@ilities.com',
     url="https://cyclonedds.io",
     project_urls={
         "Documentation": "https://cyclonedds.io/docs",
