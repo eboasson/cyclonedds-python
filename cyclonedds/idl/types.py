@@ -63,8 +63,8 @@ class sequence:
 
         if len(tup) not in [1, 2] or (len(tup) == 2 and type(tup[1]) != int):
             raise TypeError("A sequence takes a subtype and an optional maximum length.")
-        if len(tup) > 1 and (tup[1] <= 0 or tup[1] > 65535):
-            return TypeError("Sequence max length should be between 0 and 65536.")
+        if len(tup) > 1 and (tup[1] <= 0 or tup[1] > 2147483647):
+            return TypeError("Sequence max length should be between 0 and 2147483647.")
         return _th.Annotated[_typing.Sequence[tup[0]], cls(*tup)]
 
     def __init__(self, subtype: type, max_length: _typing.Optional[int] = None) -> None:
